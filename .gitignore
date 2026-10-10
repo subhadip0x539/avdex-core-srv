@@ -1,0 +1,8 @@
+# Environment files
+.env
+
+# Temporary directories
+/tmp/
+
+# Binaries & Executables
+*.exe
