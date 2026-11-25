@@ -41,11 +41,16 @@ func (r *DexRepository) GetDex(ctx context.Context, id string) (*domain.Dex, *do
 }
 
 func (r *DexRepository) GetDexs(ctx context.Context, query *domain.Query) ([]*domain.Dex, *domain.Error) {
+	condition, args, err := domain.NewCondition("a", query.Sort, query.Filters)
+	if err != nil {
+		return nil, domain.NewInternalServerError(err)
+	}
+
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
-		SELECT id, name, color
-		FROM dexs
-		ORDER BY %s %s
-	`, query.Sort.By, query.Sort.Order))
+    	SELECT d.id, d.name, d.color
+    	FROM dexs d
+    	%s
+	`, condition), args...)
 	if err != nil {
 		return nil, domain.NewInternalServerError(err)
 	}
