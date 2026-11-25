@@ -21,11 +21,26 @@ func (r *Router) Register(rg *gin.RouterGroup) {
 	artifactService := service.NewArtifactService(artifactRepository)
 	artifactHandler := handler.NewArtifactHandler(artifactService)
 
+	dexRepository := repository.NewDexRepository(r.pool)
+	dexService := service.NewDexService(dexRepository)
+	dexHandler := handler.NewDexHandler(dexService)
+
 	rg.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "pong"})
 	})
 
 	v1 := rg.Group("/v1")
+
+	dex := v1.Group("/dex")
+	{
+		dex.POST("", dexHandler.CreateDex)
+	}
+
+	dexs := v1.Group("/dexs")
+	{
+		dexs.POST("", dexHandler.GetDexs)
+		dexs.GET(":id", dexHandler.GetDex)
+	}
 
 	artifact := v1.Group("/artifact")
 	{
@@ -34,10 +49,7 @@ func (r *Router) Register(rg *gin.RouterGroup) {
 
 	artifacts := v1.Group("/artifacts")
 	{
-		artifacts.GET("", artifactHandler.GetArtifacts)
+		artifacts.POST("", artifactHandler.GetArtifacts)
 		artifacts.GET(":id", artifactHandler.GetArtifact)
-
-		artifacts.POST(":id/domain", artifactHandler.CreateArtifact)
 	}
-
 }

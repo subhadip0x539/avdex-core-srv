@@ -4,16 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"net/http"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/subhadip0x539/arc-dex-core-srv/src/internal/domain"
 )
-
-const defaultSiteID = "JavTrailers"
 
 type ArtifactRepository struct {
 	pool *pgxpool.Pool
@@ -24,13 +19,12 @@ func NewArtifactRepository(pool *pgxpool.Pool) *ArtifactRepository {
 }
 
 func (r *ArtifactRepository) GetArtifact(ctx context.Context, id string) (*domain.Artifact, *domain.Error) {
-	a := &domain.Artifact{}
-	var e []byte
+	a, e := &domain.Artifact{}, []byte{}
 
 	err := r.pool.QueryRow(
 		ctx,
 		`
-		SELECT id, name, gender, height, birthdate, image, chest, hips, waist, element_id, extra
+		SELECT id, name, image, reference, dex_id, extra
 		FROM artifacts
 		WHERE id = $1
 		`,
@@ -38,78 +32,71 @@ func (r *ArtifactRepository) GetArtifact(ctx context.Context, id string) (*domai
 	).Scan(
 		&a.ID,
 		&a.Name,
-		&a.Gender,
-		&a.Height,
-		&a.Birthdate,
 		&a.Image,
-		&a.Measurements.Chest,
-		&a.Measurements.Hips,
-		&a.Measurements.Waist,
-		&a.Element,
+		&a.Reference,
+		&a.Dex.ID,
 		&e,
 	)
 	if err != nil {
-		slog.Error(err.Error())
-		return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError)}
+		return nil, domain.NewInternalServerError(err)
 	}
 
-	if err := json.Unmarshal(e, &a.Extra); err != nil {
-		slog.Error(err.Error())
-		return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
-	}
-
-	rows, err := r.pool.Query(
-		ctx,
-		`
-		SELECT a_s.site_id, s.name, a_s.url
-		FROM artifact_sites AS a_s
-		JOIN sites AS s ON s.id = a_s.site_id
-		WHERE a_S.artifact_id = $1
-		`,
-		id,
+	err = r.pool.QueryRow(ctx, `
+		SELECT id, name, color
+		FROM dexs
+		WHERE id = $1
+	`, a.Dex.ID).Scan(
+		&a.Dex.ID,
+		&a.Dex.Name,
+		&a.Dex.Color,
 	)
 	if err != nil {
-		slog.Error(err.Error())
-		return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+		return nil, domain.NewInternalServerError(err)
+	}
+
+	rows, err := r.pool.Query(ctx, `
+        SELECT id, name, url
+        FROM artifact_sites
+        WHERE artifact_id = $1
+    `, id)
+	if err != nil {
+		return nil, domain.NewInternalServerError(err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var s domain.Site
 		if err := rows.Scan(&s.ID, &s.Name, &s.URL); err != nil {
-			slog.Error(err.Error())
-			return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+			return nil, domain.NewInternalServerError(err)
 		}
 
 		a.Sites = append(a.Sites, s)
-
-		if s.ID == defaultSiteID {
-			sc := s
-			a.Domain = &sc
-		}
 	}
 	if err := rows.Err(); err != nil {
-		slog.Error(err.Error())
-		return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+		return nil, domain.NewInternalServerError(err)
 	}
 
-	now := time.Now()
-	age := now.Year() - a.Birthdate.Year()
-
-	a.Age = age
+	if err := json.Unmarshal(e, &a.Extra); err != nil {
+		return nil, domain.NewInternalServerError(err)
+	}
 
 	return a, nil
 }
 
-func (r *ArtifactRepository) GetArtifacts(ctx context.Context, query domain.Query) ([]*domain.Artifact, *domain.Error) {
-	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
-		SELECT id, name, gender, height, birthdate, image, chest, hips, waist, element_id, extra
-		FROM artifacts
-		ORDER BY %s %s
-	`, query.Sort.By, query.Sort.Order))
+func (r *ArtifactRepository) GetArtifacts(ctx context.Context, query *domain.Query) ([]*domain.Artifact, *domain.Error) {
+	condition, args, err := domain.NewCondition("a", query.Sort, query.Filters)
 	if err != nil {
-		slog.Error(err.Error())
-		return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+		return nil, domain.NewInternalServerError(err)
+	}
+
+	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+		SELECT a.id, a.name, COALESCE(a.image, ''), a.reference, d.id, d.name, d.color, a.extra
+		FROM artifacts a
+		LEFT JOIN dexs d ON d.id = a.dex_id
+		%s
+	`, condition), args...)
+	if err != nil {
+		return nil, domain.NewInternalServerError(err)
 	}
 	defer rows.Close()
 
@@ -121,48 +108,31 @@ func (r *ArtifactRepository) GetArtifacts(ctx context.Context, query domain.Quer
 		if err := rows.Scan(
 			&a.ID,
 			&a.Name,
-			&a.Gender,
-			&a.Height,
-			&a.Birthdate,
 			&a.Image,
-			&a.Measurements.Chest,
-			&a.Measurements.Hips,
-			&a.Measurements.Waist,
-			&a.Element,
+			&a.Reference,
+			&a.Dex.ID,
+			&a.Dex.Name,
+			&a.Dex.Color,
 			&e,
 		); err != nil {
-			slog.Error(err.Error())
-			return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+			return nil, domain.NewInternalServerError(err)
 		}
 
 		if err := json.Unmarshal(e, &a.Extra); err != nil {
-			slog.Error(err.Error())
-			return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+			return nil, domain.NewInternalServerError(err)
 		}
-
-		now := time.Now()
-		age := now.Year() - a.Birthdate.Year()
-
-		if now.Month() < a.Birthdate.Month() ||
-			(now.Month() == a.Birthdate.Month() && now.Day() < a.Birthdate.Day()) {
-			age--
-		}
-
-		a.Age = age
 
 		amap[a.ID] = a
 		ids = append(ids, a.ID)
 	}
 
 	srows, err := r.pool.Query(ctx, `
-		SELECT a_s.artifact_id, a_s.site_id, s.name, a_s.url
-		FROM artifact_sites a_s
-		JOIN sites s ON s.id = a_s.site_id
-		WHERE a_s.artifact_id = ANY($1)
-	`, ids)
+        SELECT id, name, artifact_id, url
+        FROM artifact_sites
+        WHERE artifact_id = ANY($1)
+    `, ids)
 	if err != nil {
-		slog.Error(err.Error())
-		return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+		return nil, domain.NewInternalServerError(err)
 	}
 	defer srows.Close()
 
@@ -171,25 +141,16 @@ func (r *ArtifactRepository) GetArtifacts(ctx context.Context, query domain.Quer
 		var s domain.Site
 
 		if err := srows.Scan(&id, &s.ID, &s.Name, &s.URL); err != nil {
-			slog.Error(err.Error())
-			return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+			return nil, domain.NewInternalServerError(err)
 		}
-
-		fmt.Println(s.ID)
 
 		if a, ok := amap[id]; ok {
 			a.Sites = append(a.Sites, s)
-
-			if s.ID == defaultSiteID {
-				sc := s
-				a.Domain = &sc
-			}
 		}
 	}
 
 	if err := srows.Err(); err != nil {
-		slog.Error(err.Error())
-		return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+		return nil, domain.NewInternalServerError(err)
 	}
 
 	artifacts := make([]*domain.Artifact, 0, len(ids))
@@ -203,27 +164,21 @@ func (r *ArtifactRepository) GetArtifacts(ctx context.Context, query domain.Quer
 func (r *ArtifactRepository) CreateArtifact(ctx context.Context, artifact domain.Artifact) (*domain.Artifact, *domain.Error) {
 	extra, err := json.Marshal(artifact.Extra)
 	if err != nil {
-		slog.Error(err.Error())
-		return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+		return nil, domain.NewInternalServerError(err)
 	}
 
-	id := uuid.New()
+	id := uuid.NewString()
 
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO artifacts (id, name, gender, height, birthdate, image, chest, hips, waist, element_id, extra)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		RETURNING id, name, gender, height, birthdate, image, chest, hips, waist, element_id, extra
+		INSERT INTO artifacts (id, name, image, reference, dex_id, extra)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, name, image, reference, dex_id, extra
 	`,
-		id.String(),
+		id,
 		artifact.Name,
-		artifact.Gender,
-		artifact.Height,
-		artifact.Birthdate,
 		artifact.Image,
-		artifact.Measurements.Chest,
-		artifact.Measurements.Hips,
-		artifact.Measurements.Waist,
-		artifact.Element,
+		artifact.Reference,
+		artifact.Dex.ID,
 		extra,
 	)
 
@@ -233,25 +188,18 @@ func (r *ArtifactRepository) CreateArtifact(ctx context.Context, artifact domain
 	err = row.Scan(
 		&a.ID,
 		&a.Name,
-		&a.Gender,
-		&a.Height,
-		&a.Birthdate,
 		&a.Image,
-		&a.Measurements.Chest,
-		&a.Measurements.Hips,
-		&a.Measurements.Waist,
-		&a.Element,
+		&a.Reference,
+		&a.Dex.ID,
 		&e,
 	)
 	if err != nil {
-		slog.Error(err.Error())
-		return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+		return nil, domain.NewInternalServerError(err)
 	}
 
 	if e != nil {
 		if err := json.Unmarshal(e, &a.Extra); err != nil {
-			slog.Error(err.Error())
-			return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+			return nil, domain.NewInternalServerError(err)
 		}
 	}
 
@@ -259,42 +207,38 @@ func (r *ArtifactRepository) CreateArtifact(ctx context.Context, artifact domain
 }
 
 func (r *ArtifactRepository) CreateArtifactSites(ctx context.Context, artifactID string, sites []domain.Site) ([]domain.Site, *domain.Error) {
-	ptx, err := r.pool.Begin(ctx)
-	if err != nil {
-		slog.Error(err.Error())
-		return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
-	}
-	defer ptx.Rollback(ctx)
+	created := make([]domain.Site, 0, len(sites))
 
-	var result []domain.Site
-
-	for _, s := range sites {
-		row := ptx.QueryRow(ctx, `
-			WITH upserted AS (
-				INSERT INTO artifact_sites (artifact_id, site_id, url)
-				VALUES ($1, $2, $3)
-				ON CONFLICT (artifact_id, site_id) DO UPDATE SET url = EXCLUDED.url
-				RETURNING artifact_id, site_id, url
-			)
-			SELECT s.id, s.name, upserted.url
-			FROM upserted
-			JOIN sites s ON s.id = upserted.site_id
-		`, artifactID, s.ID, s.URL)
+	for _, site := range sites {
+		id := uuid.NewString()
 
 		var s domain.Site
 
-		if err := row.Scan(&s.ID, &s.Name, &s.URL); err != nil {
-			slog.Error(err.Error())
-			return nil, &domain.Error{Code: http.StatusInternalServerError, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
+		err := r.pool.QueryRow(ctx, `
+            INSERT INTO artifact_sites (
+                id,
+                name,
+                artifact_id,
+                url
+            )
+            VALUES ($1, $2, $3, $4)
+            RETURNING id, name, url
+        `,
+			id,
+			site.Name,
+			artifactID,
+			site.URL,
+		).Scan(
+			&s.ID,
+			&s.Name,
+			&s.URL,
+		)
+		if err != nil {
+			return nil, domain.NewInternalServerError(err)
 		}
 
-		result = append(result, s)
+		created = append(created, s)
 	}
 
-	if err := ptx.Commit(ctx); err != nil {
-		slog.Error(err.Error())
-		return nil, &domain.Error{Code: 500, Message: string(domain.ErrorMessageInternalServerError), Trace: err}
-	}
-
-	return result, nil
+	return created, nil
 }

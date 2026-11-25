@@ -1,5 +1,7 @@
 package domain
 
+import "net/http"
+
 type ErrorMessage string
 
 const (
@@ -10,6 +12,14 @@ const (
 
 type Error struct {
 	Code    int
-	Message string
+	Message ErrorMessage
 	Trace   error
+}
+
+func NewBadRequest(trace error) *Error {
+	return &Error{Code: http.StatusBadRequest, Message: ErrorMessageBadRequest, Trace: trace}
+}
+
+func NewInternalServerError(trace error) *Error {
+	return &Error{Code: http.StatusInternalServerError, Message: ErrorMessageInternalServerError, Trace: trace}
 }

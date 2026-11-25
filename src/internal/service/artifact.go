@@ -2,9 +2,7 @@ package service
 
 import (
 	"context"
-	"log/slog"
-	"net/http"
-	"time"
+	"fmt"
 
 	"github.com/subhadip0x539/arc-dex-core-srv/src/internal/domain"
 	"github.com/subhadip0x539/arc-dex-core-srv/src/internal/dto"
@@ -28,8 +26,8 @@ func (s *ArtifactService) GetArtifact(ctx context.Context, id string) (*domain.A
 	return result, nil
 }
 
-func (s *ArtifactService) GetArtifacts(ctx context.Context, query dto.GetArtifactsRequestQuery) ([]*domain.Artifact, *domain.Error) {
-	qos := domain.NewQuery(query.Sort)
+func (s *ArtifactService) GetArtifacts(ctx context.Context, query dto.GetArtifactsRequestBody) ([]*domain.Artifact, *domain.Error) {
+	qos := domain.NewQuery(query.Sort, query.Filters)
 
 	result, err := s.repo.GetArtifacts(ctx, qos)
 	if err != nil {
@@ -40,27 +38,15 @@ func (s *ArtifactService) GetArtifacts(ctx context.Context, query dto.GetArtifac
 }
 
 func (s *ArtifactService) CreateArtifact(ctx context.Context, payload dto.CreateArtifactRequestBody) (*domain.Artifact, *domain.Error) {
-	var birthdate time.Time
-
-	if payload.Birthdate != "" {
-		var err error
-		birthdate, err = time.Parse("2006-01-02", payload.Birthdate)
-		if err != nil {
-			slog.Error(err.Error())
-			return nil, &domain.Error{Code: http.StatusBadRequest, Message: string(domain.ErrorMessageBadRequest), Trace: err}
-		}
-	}
-
 	artifact := domain.Artifact{
-		Name:         payload.Name,
-		Gender:       domain.Gender(payload.Gener),
-		Height:       payload.Height,
-		Birthdate:    birthdate,
-		Measurements: domain.Measurements(payload.Measurements),
-		Image:        payload.Image,
-		Element:      payload.Element,
-		Extra:        payload.Extra,
+		Name:      payload.Name,
+		Image:     payload.Image,
+		Reference: payload.Reference,
+		Dex:       domain.Dex{ID: payload.DexID},
+		Extra:     payload.Extra,
 	}
+
+	fmt.Print(artifact)
 
 	result, err := s.repo.CreateArtifact(ctx, artifact)
 	if err != nil {
@@ -71,7 +57,6 @@ func (s *ArtifactService) CreateArtifact(ctx context.Context, payload dto.Create
 
 	for i, site := range payload.Sites {
 		sites[i] = domain.Site{
-			ID:   site.ID,
 			Name: site.Name,
 			URL:  site.URL,
 		}

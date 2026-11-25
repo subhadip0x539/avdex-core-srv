@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -25,7 +26,8 @@ func (h *ArtifactHandler) GetArtifact(ctx *gin.Context) {
 
 	result, err := h.svc.GetArtifact(ctx, id)
 	if err != nil {
-		ctx.JSON(err.Code, dto.Response[any]{Message: err.Message})
+		slog.Error(err.Trace.Error())
+		ctx.JSON(err.Code, dto.Response[any]{Message: string(err.Message)})
 		return
 	}
 
@@ -33,40 +35,35 @@ func (h *ArtifactHandler) GetArtifact(ctx *gin.Context) {
 
 	for _, s := range result.Sites {
 		sites = append(sites, dto.Site{
-			ID:   s.ID,
 			Name: s.Name,
 			URL:  s.URL,
 		})
 	}
 
 	artifact := dto.GetArtifactResponse{
-		ID:           result.ID,
-		Name:         result.Name,
-		Gener:        string(result.Gender),
-		Height:       result.Height,
-		Birthdate:    result.Birthdate.Format("2006-01-02"),
-		Age:          result.Age,
-		Measurements: dto.Measurements(result.Measurements),
-		Image:        result.Image,
-		Element:      result.Element,
-		Sites:        sites,
-		Domain:       (*dto.Site)(result.Domain),
-		Extra:        result.Extra,
+		ID:        result.ID,
+		Name:      result.Name,
+		Image:     result.Image,
+		Sites:     sites,
+		Reference: result.Reference,
+		DexID:     result.Dex.ID,
+		Extra:     result.Extra,
 	}
 
 	ctx.JSON(http.StatusOK, dto.Response[dto.GetArtifactResponse]{Body: artifact})
 }
 
 func (h *ArtifactHandler) GetArtifacts(ctx *gin.Context) {
-	var query dto.GetArtifactsRequestQuery
-	if err := ctx.ShouldBindQuery(&query); err != nil {
+	var body dto.GetArtifactsRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
 		ctx.JSON(http.StatusBadRequest, dto.Response[any]{Message: err.Error()})
 		return
 	}
 
-	result, err := h.svc.GetArtifacts(ctx, query)
+	result, err := h.svc.GetArtifacts(ctx, body)
 	if err != nil {
-		ctx.JSON(err.Code, dto.Response[any]{Message: err.Message})
+		slog.Error(err.Trace.Error())
+		ctx.JSON(err.Code, dto.Response[any]{Message: string(err.Message)})
 		return
 	}
 
@@ -77,25 +74,19 @@ func (h *ArtifactHandler) GetArtifacts(ctx *gin.Context) {
 
 		for _, s := range r.Sites {
 			sites = append(sites, dto.Site{
-				ID:   s.ID,
 				Name: s.Name,
 				URL:  s.URL,
 			})
 		}
 
 		artifacts = append(artifacts, dto.GetArtifactResponse{
-			ID:           r.ID,
-			Name:         r.Name,
-			Gener:        string(r.Gender),
-			Height:       r.Height,
-			Birthdate:    r.Birthdate.Format("2006-01-02"),
-			Age:          r.Age,
-			Measurements: dto.Measurements(r.Measurements),
-			Image:        r.Image,
-			Element:      r.Element,
-			Sites:        sites,
-			Domain:       (*dto.Site)(r.Domain),
-			Extra:        r.Extra,
+			ID:        r.ID,
+			Name:      r.Name,
+			Image:     r.Image,
+			Sites:     sites,
+			Reference: r.Reference,
+			DexID:     r.Dex.ID,
+			Extra:     r.Extra,
 		})
 	}
 
@@ -111,6 +102,7 @@ func (h *ArtifactHandler) CreateArtifact(ctx *gin.Context) {
 
 	_, err := h.svc.CreateArtifact(ctx.Request.Context(), body)
 	if err != nil {
+		slog.Error(err.Trace.Error())
 		ctx.JSON(err.Code, dto.Response[any]{Message: string(err.Message)})
 		return
 	}
