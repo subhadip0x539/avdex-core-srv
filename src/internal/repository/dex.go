@@ -41,7 +41,7 @@ func (r *DexRepository) GetDex(ctx context.Context, id string) (*domain.Dex, *do
 }
 
 func (r *DexRepository) GetDexs(ctx context.Context, query *domain.Query) ([]*domain.Dex, *domain.Error) {
-	condition, args, err := domain.NewCondition("a", query.Sort, query.Filters)
+	condition, args, err := domain.NewCondition("d", query.Sort, query.Filters)
 	if err != nil {
 		return nil, domain.NewInternalServerError(err)
 	}
