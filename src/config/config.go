@@ -48,21 +48,21 @@ func (c *ConfigBuilder) Load() *ConfigBuilder {
 
 	if mode == ConfigModeRelease {
 		c.loader.AutomaticEnv()
-	}
+	} else {
+		baseDir, err := os.Getwd()
+		if err != nil {
+			c.err = err
+			return c
+		}
 
-	baseDir, err := os.Getwd()
-	if err != nil {
-		c.err = err
-		return c
-	}
+		c.loader.AddConfigPath(baseDir)
+		c.loader.SetConfigName(".env")
+		c.loader.SetConfigType("env")
 
-	c.loader.AddConfigPath(baseDir)
-	c.loader.SetConfigName(".env")
-	c.loader.SetConfigType("env")
-
-	if err := c.loader.ReadInConfig(); err != nil {
-		c.err = nil
-		return c
+		if err := c.loader.ReadInConfig(); err != nil {
+			c.err = nil
+			return c
+		}
 	}
 
 	c.config = Config{
